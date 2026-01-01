@@ -1,18 +1,42 @@
 version: '3.8'
 
 services:
+  traefik:
+    image: traefik:v2.10
+    restart: always
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${LETSENCRYPT_EMAIL}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "traefik-certificates:/letsencrypt"
+
   rocketchat:
-    image: registry.rocket.chat/rocketchat/rocket.chat:{{RC_VERSION}}
+    image: registry.rocket.chat/rocketchat/rocket.chat:${RC_VERSION}
     restart: always
     volumes:
       - uploads:/app/uploads
     environment:
-      PORT: 3000
-      ROOT_URL: "{{ROOT_URL}}"
-      MONGO_URL: "mongodb://mongodb:27017/rocketchat?replicaSet=rs0&directConnection=true"
-      MONGO_OPLOG_URL: "mongodb://mongodb:27017/local?replicaSet=rs0&directConnection=true"
-    ports:
-      - "{{HOST_PORT}}:3000"
+      - PORT=3000
+      - ROOT_URL=https://${DOMAIN}
+      - MONGO_URL=mongodb://${MONGO_USER}:${MONGO_PASS}@mongodb:27017/rocketchat?authSource=admin&replicaSet=rs0&directConnection=true
+      - MONGO_OPLOG_URL=mongodb://${MONGO_USER}:${MONGO_PASS}@mongodb:27017/local?authSource=admin&replicaSet=rs0&directConnection=true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rocketchat.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.rocketchat.entrypoints=websecure"
+      - "traefik.http.routers.rocketchat.tls.certresolver=myresolver"
+      - "traefik.http.services.rocketchat.loadbalancer.server.port=3000"
     depends_on:
       - mongodb
 
@@ -20,9 +44,12 @@ services:
     image: mongo:5.0
     restart: always
     volumes:
-     - db-data:/data/db
-     - db-dump:/dump
-    command: mongod --oplogSize 128 --replSet rs0 --bind_ip_all
+      - db-data:/data/db
+      - db-dump:/dump
+    command: mongod --oplogSize 128 --replSet rs0 --bind_ip_all --auth
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASS}
     expose:
       - 27017
 
@@ -32,7 +59,7 @@ services:
     restart: "no"
     command: >
       bash -c "for i in `seq 1 30`; do
-        mongosh mongodb/rocketchat --quiet --eval \"rs.initiate({ _id: 'rs0', members: [ { _id: 0, host: 'mongodb:27017' } ]})\" &&
+        mongosh mongodb/rocketchat --quiet --authenticationDatabase admin -u ${MONGO_USER} -p ${MONGO_PASS} --eval \"rs.initiate({ _id: 'rs0', members: [ { _id: 0, host: 'mongodb:27017' } ]})\" &&
         s=$$? && break || s=$$?;
         echo \"Tried $$i times. Waiting 5 secs...\";
         sleep 5;
@@ -44,3 +71,4 @@ volumes:
   uploads:
   db-data:
   db-dump:
+  traefik-certificates:
