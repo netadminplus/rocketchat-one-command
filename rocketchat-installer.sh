@@ -87,7 +87,8 @@ ask_question() {
         echo -e "${MAGENTA}?${NC} $question"
     fi
     
-    read -r input
+    # Read from terminal directly, not from stdin
+    read -r input < /dev/tty
     
     if [ -z "$input" ] && [ -n "$default" ]; then
         eval "$var_name='$default'"
@@ -176,22 +177,30 @@ check_system_requirements() {
         print_success "RAM: ${total_ram_gb}GB"
     fi
     
+    # Check CPU cores
+    local cpu_cores=$(nproc)
+    if [ "$cpu_cores" -lt 2 ]; then
+        print_warning "CPU: ${cpu_cores} core(s) (2+ cores recommended for better performance)"
+    else
+        print_success "CPU: ${cpu_cores} core(s)"
+    fi
+    
     # Check disk space (need at least 20GB)
     local disk_space=$(df -BG "$INSTALL_DIR" | awk 'NR==2 {print $4}' | sed 's/G//')
     if [ "$disk_space" -lt 20 ]; then
-        print_error "Disk space: ${disk_space}GB available (Minimum 20GB required)"
-        requirements_met=false
+        print_warning "Disk space: ${disk_space}GB available (Minimum 20GB recommended)"
+        print_info "You may run out of space as your RocketChat database grows"
+        echo ""
+        ask_question "Do you want to continue anyway? (yes/no)" continue_with_low_disk "no"
+        
+        if [[ ! "$continue_with_low_disk" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+            print_error "Installation cancelled due to insufficient disk space"
+            exit 1
+        fi
+        print_warning "Continuing with limited disk space - monitor usage regularly"
     else
         print_success "Disk space: ${disk_space}GB available"
     fi
-    
-    if [ "$requirements_met" = false ]; then
-        echo ""
-        print_error "System requirements not met. Installation cannot continue."
-        exit 1
-    fi
-    
-    print_success "All system requirements met"
 }
 
 check_docker_hub_access() {
@@ -237,11 +246,11 @@ install_dependencies() {
             apt update -qq
             
             print_info "Installing dependencies..."
-            apt install -y curl wget git ca-certificates gnupg lsb-release jq &> /dev/null
+            apt install -y curl wget git ca-certificates gnupg lsb-release jq bc &> /dev/null
             ;;
         dnf|yum)
             print_info "Installing dependencies..."
-            $PKG_MANAGER install -y curl wget git ca-certificates jq &> /dev/null
+            $PKG_MANAGER install -y curl wget git ca-certificates jq bc &> /dev/null
             ;;
     esac
     
@@ -264,31 +273,87 @@ install_docker() {
             # Remove old versions
             apt remove -y docker docker-engine docker.io containerd runc &> /dev/null || true
             
+            # Method 1: Try official repository first
+            print_info "Attempting Docker installation from official repository..."
+            
             # Add Docker's official GPG key
             install -m 0755 -d /etc/apt/keyrings
-            curl -fsSL https://download.docker.com/linux/$DISTRO/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-            chmod a+r /etc/apt/keyrings/docker.gpg
             
-            # Add Docker repository
-            echo \
-                "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$DISTRO \
-                $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-            
-            # Install Docker
-            apt update -qq
-            apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin &> /dev/null
+            if curl -fsSL https://download.docker.com/linux/$DISTRO/gpg -o /etc/apt/keyrings/docker.asc 2>/dev/null; then
+                chmod a+r /etc/apt/keyrings/docker.asc
+                
+                # Add Docker repository using new format
+                cat > /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/$DISTRO
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+                
+                # Try to install
+                if apt update -qq 2>/dev/null && apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin &> /dev/null; then
+                    print_success "Docker installed from official repository"
+                else
+                    print_warning "Official repository blocked or unavailable"
+                    print_info "Trying alternative installation method..."
+                    
+                    # Clean up failed attempt
+                    rm -f /etc/apt/sources.list.d/docker.sources /etc/apt/keyrings/docker.asc
+                    
+                    # Method 2: Install from Ubuntu repository
+                    print_info "Installing Docker from Ubuntu repository..."
+                    apt update -qq
+                    apt install -y docker.io docker-compose &> /dev/null
+                    
+                    # Create docker compose plugin symlink for compatibility
+                    mkdir -p /usr/local/lib/docker/cli-plugins
+                    ln -sf /usr/bin/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null || true
+                    
+                    print_success "Docker installed from Ubuntu repository"
+                fi
+            else
+                print_warning "Cannot access Docker official repository (possibly blocked)"
+                print_info "Installing Docker from Ubuntu repository..."
+                
+                apt update -qq
+                apt install -y docker.io docker-compose &> /dev/null
+                
+                # Create docker compose plugin symlink for compatibility
+                mkdir -p /usr/local/lib/docker/cli-plugins
+                ln -sf /usr/bin/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null || true
+                
+                print_success "Docker installed from Ubuntu repository"
+            fi
             ;;
         dnf|yum)
             # Remove old versions
             $PKG_MANAGER remove -y docker docker-client docker-client-latest docker-common docker-latest \
                 docker-latest-logrotate docker-logrotate docker-engine &> /dev/null || true
             
-            # Add Docker repository
-            $PKG_MANAGER install -y yum-utils &> /dev/null
-            yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+            print_info "Attempting Docker installation from official repository..."
             
-            # Install Docker
-            $PKG_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin &> /dev/null
+            # Add Docker repository
+            if $PKG_MANAGER install -y yum-utils &> /dev/null && \
+               yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo &> /dev/null; then
+                
+                # Try to install
+                if $PKG_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin &> /dev/null; then
+                    print_success "Docker installed from official repository"
+                else
+                    print_warning "Official repository blocked or unavailable"
+                    print_info "Installing Docker from system repository..."
+                    
+                    $PKG_MANAGER install -y docker docker-compose &> /dev/null
+                    print_success "Docker installed from system repository"
+                fi
+            else
+                print_warning "Cannot access Docker official repository"
+                print_info "Installing Docker from system repository..."
+                
+                $PKG_MANAGER install -y docker docker-compose &> /dev/null
+                print_success "Docker installed from system repository"
+            fi
             ;;
     esac
     
@@ -311,8 +376,25 @@ EOF
         print_success "Docker registry mirror configured"
     fi
     
+    # Verify installation
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker installation failed"
+        exit 1
+    fi
+    
     local new_version=$(docker --version | awk '{print $3}' | sed 's/,//')
     print_success "Docker installed/updated (version: $new_version)"
+    
+    # Check for docker compose (plugin or standalone)
+    if docker compose version &> /dev/null; then
+        print_success "Docker Compose (plugin) is available"
+    elif command -v docker-compose &> /dev/null; then
+        print_success "Docker Compose (standalone) is available"
+        print_info "Note: Using 'docker-compose' command instead of 'docker compose'"
+    else
+        print_error "Docker Compose is not available"
+        exit 1
+    fi
 }
 
 verify_dns() {
@@ -541,11 +623,21 @@ start_services() {
     
     cd "$INSTALL_DIR"
     
+    # Detect docker compose command
+    if docker compose version &> /dev/null; then
+        DOCKER_COMPOSE_CMD="docker compose"
+    elif command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="docker-compose"
+    else
+        print_error "Docker Compose not found"
+        exit 1
+    fi
+    
     print_info "Pulling Docker images... (this may take a few minutes)"
-    docker compose pull
+    $DOCKER_COMPOSE_CMD pull
     
     print_info "Starting containers..."
-    docker compose up -d
+    $DOCKER_COMPOSE_CMD up -d
     
     print_success "Services started successfully"
     
@@ -555,7 +647,7 @@ start_services() {
     local waited=0
     
     while [ $waited -lt $max_wait ]; do
-        if docker compose logs rocketchat 2>&1 | grep -q "SERVER RUNNING"; then
+        if $DOCKER_COMPOSE_CMD logs rocketchat 2>&1 | grep -q "SERVER RUNNING"; then
             print_success "RocketChat is ready!"
             return 0
         fi
@@ -567,7 +659,7 @@ start_services() {
     
     echo ""
     print_warning "RocketChat initialization is taking longer than expected"
-    print_info "You can check logs with: ${YELLOW}docker compose logs -f rocketchat${NC}"
+    print_info "You can check logs with: ${YELLOW}$DOCKER_COMPOSE_CMD logs -f rocketchat${NC}"
 }
 
 display_firewall_commands() {
@@ -608,6 +700,13 @@ display_final_info() {
     print_separator
     echo ""
     
+    # Detect docker compose command
+    if docker compose version &> /dev/null; then
+        local dc_cmd="docker compose"
+    else
+        local dc_cmd="docker-compose"
+    fi
+    
     print_info "${CYAN}Access Information:${NC}"
     echo -e "  ${GREEN}URL:${NC} https://$DOMAIN"
     echo -e "  ${GREEN}First user to register becomes admin${NC}"
@@ -624,11 +723,11 @@ display_final_info() {
     echo ""
     
     print_info "${CYAN}Useful Commands:${NC}"
-    echo -e "  ${YELLOW}View logs:${NC}         cd $INSTALL_DIR && docker compose logs -f"
-    echo -e "  ${YELLOW}Stop services:${NC}     cd $INSTALL_DIR && docker compose stop"
-    echo -e "  ${YELLOW}Start services:${NC}    cd $INSTALL_DIR && docker compose start"
-    echo -e "  ${YELLOW}Restart services:${NC}  cd $INSTALL_DIR && docker compose restart"
-    echo -e "  ${YELLOW}View status:${NC}       cd $INSTALL_DIR && docker compose ps"
+    echo -e "  ${YELLOW}View logs:${NC}         cd $INSTALL_DIR && $dc_cmd logs -f"
+    echo -e "  ${YELLOW}Stop services:${NC}     cd $INSTALL_DIR && $dc_cmd stop"
+    echo -e "  ${YELLOW}Start services:${NC}    cd $INSTALL_DIR && $dc_cmd start"
+    echo -e "  ${YELLOW}Restart services:${NC}  cd $INSTALL_DIR && $dc_cmd restart"
+    echo -e "  ${YELLOW}View status:${NC}       cd $INSTALL_DIR && $dc_cmd ps"
     echo ""
     
     print_separator
