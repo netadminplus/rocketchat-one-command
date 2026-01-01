@@ -1,16 +1,15 @@
 #!/bin/bash
 
 #############################################################################
-# RocketChat One-Click Installer
+# RocketChat One-Click Installer (Final Robust Version)
 # 
 # Created by: Ramtin - NetAdminPlus
 # Website: https://netadminplus.com
-# YouTube: https://youtube.com/@netadminplus
-# Instagram: https://instagram.com/netadminplus
 #
-# Description: Automated RocketChat deployment with Docker, SSL, and 
-#              Iranian mirror support.
-#              Includes auto-cleanup and Docker Compose V2 enforcement.
+# Updates:
+# - Auto-cleanup of old data to prevent password mismatch
+# - Forces Docker Compose V2 to fix compatibility issues
+# - Robust MongoDB keyfile handling
 #############################################################################
 
 set -e
@@ -46,36 +45,17 @@ print_banner() {
     echo "║                                                                ║"
     echo "║              Created by: Ramtin - NetAdminPlus                ║"
     echo "║           https://netadminplus.com                            ║"
-    echo "║           YouTube: @netadminplus                              ║"
-    echo "║           Instagram: @netadminplus                            ║"
     echo "║                                                                ║"
     echo "╚════════════════════════════════════════════════════════════════╝"
     echo -e "${NC}\n"
 }
 
-print_step() {
-    echo -e "${BLUE}==>${NC} ${GREEN}$1${NC}"
-}
-
-print_info() {
-    echo -e "${CYAN}ℹ${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}✓${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}✗${NC} $1"
-}
-
-print_separator() {
-    echo -e "${CYAN}────────────────────────────────────────────────────────────────${NC}"
-}
+print_step() { echo -e "${BLUE}==>${NC} ${GREEN}$1${NC}"; }
+print_info() { echo -e "${CYAN}ℹ${NC} $1"; }
+print_success() { echo -e "${GREEN}✓${NC} $1"; }
+print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
+print_error() { echo -e "${RED}✗${NC} $1"; }
+print_separator() { echo -e "${CYAN}────────────────────────────────────────────────────────────────${NC}"; }
 
 ask_question() {
     local question=$1
@@ -88,9 +68,7 @@ ask_question() {
         echo -e "${MAGENTA}?${NC} $question"
     fi
     
-    # Read from terminal directly, not from stdin
     read -r input < /dev/tty
-    
     if [ -z "$input" ] && [ -n "$default" ]; then
         eval "$var_name='$default'"
     else
@@ -99,7 +77,7 @@ ask_question() {
 }
 
 #############################################################################
-# Core Functions
+# Core Checks & Cleanup
 #############################################################################
 
 check_root() {
@@ -112,21 +90,17 @@ check_root() {
     print_success "Running with root privileges"
 }
 
-# --- NUCLEAR CLEANUP FUNCTION ---
+# --- NUCLEAR CLEANUP (Prevent Password Conflicts) ---
 perform_cleanup() {
     print_separator
     print_step "Performing Pre-Installation Cleanup..."
-    print_warning "This will stop all containers and delete old data to prevent password conflicts."
+    print_warning "This ensures a fresh install by removing old containers and data."
     
-    # Stop containers nicely first if docker exists
+    # Stop containers nicely first
     if command -v docker &> /dev/null; then
         print_info "Stopping existing containers..."
-        # Try docker compose down if file exists
-        if [ -f "docker-compose.yml" ]; then
-            docker compose down -v 2>/dev/null || true
-        fi
-        
-        # Force kill everything else to clear conflicts
+        docker compose down -v 2>/dev/null || true
+        # Force kill everything else
         docker rm -f $(docker ps -aq) 2>/dev/null || true
         docker network prune -f 2>/dev/null || true
     fi
@@ -154,7 +128,7 @@ detect_distro() {
                 ;;
             *)
                 PKG_MANAGER="apt"
-                print_warning "Unknown distribution: $DISTRO. Defaulting to apt."
+                print_warning "Unknown distro: $DISTRO. Defaulting to apt."
                 ;;
         esac
         print_success "Detected: $PRETTY_NAME"
@@ -166,11 +140,10 @@ detect_distro() {
 
 check_system_requirements() {
     print_step "Checking system requirements..."
-    
-    # Check RAM
     local total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+    
     if [ "$total_ram_mb" -lt 2048 ]; then
-        print_warning "Low RAM detected ($total_ram_mb MB). Minimum 2GB required."
+        print_warning "RAM: $total_ram_mb MB detected. Minimum 2GB required."
         ask_question "Continue anyway? (yes/no)" continue_ram "no"
         if [[ ! "$continue_ram" =~ ^[Yy] ]]; then exit 1; fi
     else
@@ -209,46 +182,127 @@ install_dependencies() {
 }
 
 install_docker() {
-    print_step "Configuring Docker environment..."
+    print_step "Installing/Updating Docker..."
     
-    # 1. Install Docker Engine if missing
-    if ! command -v docker &> /dev/null; then
-        print_info "Installing Docker..."
-        if [ "$PKG_MANAGER" = "apt" ]; then
-            rm -f /etc/apt/sources.list.d/docker* /etc/apt/keyrings/docker*
-            apt update -qq || true
-            apt install -y docker.io -qq
-        else
-            $PKG_MANAGER install -y docker
-        fi
-        systemctl start docker
-        systemctl enable docker
+    # Check if Docker Engine is installed
+    if command -v docker &> /dev/null; then
+        local current_version=$(docker --version | awk '{print $3}' | sed 's/,//')
+        print_info "Docker is already installed (version: $current_version)"
+    else
+        print_info "Docker not found. Installing..."
     fi
-
-    # 2. Force Install Docker Compose V2 (Fixes KeyError issue)
-    print_info "Ensuring Docker Compose V2 is installed..."
     
-    # Remove apt version which is usually old (v1.29)
+    case $PKG_MANAGER in
+        apt)
+            # Clean up old configurations
+            rm -f /etc/apt/sources.list.d/docker.list
+            rm -f /etc/apt/sources.list.d/docker.sources
+            rm -f /etc/apt/keyrings/docker.gpg
+            rm -f /etc/apt/keyrings/docker.asc
+            
+            # Remove old versions
+            apt remove -y docker docker-engine docker.io containerd runc docker-compose &> /dev/null || true
+            
+            # Method 1: Try official repository first
+            print_info "Attempting Docker installation from official repository..."
+            install -m 0755 -d /etc/apt/keyrings
+            
+            # Try to add GPG key
+            if curl -fsSL https://download.docker.com/linux/$DISTRO/gpg -o /etc/apt/keyrings/docker.asc 2>/dev/null; then
+                chmod a+r /etc/apt/keyrings/docker.asc
+                cat > /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/$DISTRO
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+                # Try to update (with || true to prevent crash on 403 Forbidden)
+                apt update -qq || true
+                
+                # Try install. If this fails (e.g. repo blocked), we go to else block
+                if apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>&1 | grep -q "Unable to locate"; then
+                    print_warning "Official repository blocked/unavailable."
+                    print_info "Switching to Ubuntu repository..."
+                    
+                    # Method 2: Fallback to Ubuntu/Debian Repository
+                    # IMPORTANT: We do NOT install 'docker-compose' here (it is too old)
+                    apt update -qq || true
+                    apt install -y docker.io -qq
+                    print_success "Docker Engine installed from OS repository"
+                else
+                    print_success "Docker installed from Official repository"
+                fi
+            else
+                print_warning "Could not fetch Docker GPG key."
+                print_info "Switching to Ubuntu repository..."
+                
+                # Method 2: Fallback
+                apt update -qq || true
+                apt install -y docker.io -qq
+                print_success "Docker Engine installed from OS repository"
+            fi
+            ;;
+        dnf|yum)
+            if ! command -v docker &> /dev/null; then
+                $PKG_MANAGER install -y docker &> /dev/null
+            fi
+            ;;
+    esac
+    
+    # Enable Docker Service
+    systemctl start docker
+    systemctl enable docker &> /dev/null
+    
+    # --- CRITICAL FIX: Ensure Docker Compose V2 is installed ---
+    print_step "Verifying Docker Compose version..."
+    
+    # 1. Remove the 'apt' version if it exists (it's likely v1.x and broken)
     if [ "$PKG_MANAGER" = "apt" ]; then
-        apt remove -y docker-compose &> /dev/null || true
+        if dpkg -l | grep -q "docker-compose"; then
+             print_info "Removing outdated package version of docker-compose..."
+             apt remove -y docker-compose &> /dev/null || true
+        fi
     fi
-    # Remove old binaries
-    rm -f /usr/bin/docker-compose /usr/local/bin/docker-compose
+    
+    # 2. Force install standalone binary V2 if the plugin isn't working or missing
+    # We download v2.24.5 which is known to be stable
+    print_info "Installing/Updating Docker Compose Standalone (V2)..."
+    rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose
+    
+    if curl -SL https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose; then
+        chmod +x /usr/local/bin/docker-compose
+        ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+        print_success "Docker Compose V2 installed successfully"
+    else
+        print_error "Failed to download Docker Compose. Check internet connection."
+        exit 1
+    fi
 
-    # Download V2 Binary
-    print_info "Downloading Docker Compose V2.24.5..."
-    curl -SL https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
-    chmod +x /usr/local/bin/docker-compose
-    ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
-    
-    # Configure Mirror if needed
+    # Configure Docker registry mirror if provided
     if [ -n "$DOCKER_REGISTRY_MIRROR" ]; then
+        print_info "Configuring Docker registry mirror..."
         mkdir -p /etc/docker
-        echo "{\"registry-mirrors\": [\"$DOCKER_REGISTRY_MIRROR\"]}" > /etc/docker/daemon.json
+        cat > /etc/docker/daemon.json <<EOF
+{
+  "registry-mirrors": ["$DOCKER_REGISTRY_MIRROR"]
+}
+EOF
         systemctl restart docker
+        print_success "Docker registry mirror configured"
     fi
     
-    print_success "Docker & Compose V2 Ready"
+    # Final Checks
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker installation failed"
+        exit 1
+    fi
+    
+    # Verify Compose works
+    if ! docker-compose version &> /dev/null; then
+         print_error "Docker Compose installation failed"
+         exit 1
+    fi
 }
 
 verify_dns() {
@@ -282,7 +336,6 @@ generate_credentials() {
 
 create_env_file() {
     print_step "Creating configuration files..."
-    
     cat > "$ENV_FILE" <<EOF
 # RocketChat Environment Configuration
 # Generated by NetAdminPlus RocketChat Installer
@@ -290,13 +343,10 @@ create_env_file() {
 
 DOMAIN=$DOMAIN
 LETSENCRYPT_EMAIL=$LETSENCRYPT_EMAIL
-
 MONGO_ROOT_PASSWORD=$MONGO_ROOT_PASSWORD
 MONGO_OPLOG_PASSWORD=$MONGO_OPLOG_PASSWORD
-
 ROOT_URL=https://$DOMAIN
 PORT=3000
-
 MONGO_URL=mongodb://rocketchat:$MONGO_OPLOG_PASSWORD@mongodb:27017/rocketchat?authSource=admin
 MONGO_OPLOG_URL=mongodb://oploguser:$MONGO_OPLOG_PASSWORD@mongodb:27017/local?authSource=admin
 EOF
@@ -308,10 +358,19 @@ create_directories() {
     print_step "Creating data directories..."
     mkdir -p "$MONGODB_DATA" "$UPLOADS_DIR" "$CERTS_DIR"
     
-    # Create MongoDB keyfile
+    # Robust Keyfile Creation: Ensure directory exists and no conflict
+    print_info "Generating MongoDB keyfile..."
+    
+    # Remove if it exists as a directory (accidental)
+    if [ -d "$MONGODB_DATA/replica.key" ]; then
+        rm -rf "$MONGODB_DATA/replica.key"
+    fi
+    
+    # Create the file
     local keyfile="$MONGODB_DATA/replica.key"
     openssl rand -base64 756 > "$keyfile"
     chmod 400 "$keyfile"
+    # User 999 is mongo inside container
     chown 999:999 "$keyfile"
     
     chmod 755 "$DATA_DIR"
@@ -320,7 +379,6 @@ create_directories() {
 
 create_docker_compose() {
     print_step "Creating Docker Compose file..."
-    
     cat > "$COMPOSE_FILE" <<'EOF'
 version: '3.8'
 
@@ -438,7 +496,7 @@ start_services() {
     print_step "Starting RocketChat services..."
     cd "$INSTALL_DIR"
     
-    # Use standalone docker-compose since we installed the binary
+    # Use standalone docker-compose
     DOCKER_COMPOSE_CMD="docker-compose"
     
     print_info "Pulling images..."
@@ -466,6 +524,16 @@ start_services() {
     print_info "Logs: $DOCKER_COMPOSE_CMD logs -f rocketchat"
 }
 
+display_firewall_commands() {
+    print_separator
+    print_step "Firewall Configuration"
+    echo ""
+    print_info "Please ensure ports 80 and 443 are open:"
+    echo -e "  ${YELLOW}sudo ufw allow 80/tcp${NC}"
+    echo -e "  ${YELLOW}sudo ufw allow 443/tcp${NC}"
+    print_separator
+}
+
 display_final_info() {
     echo ""
     print_separator
@@ -487,10 +555,9 @@ display_final_info() {
 
 main() {
     print_banner
-    
     check_root
     
-    # NUCLEAR CLEANUP (Prevents password conflicts)
+    # 1. Clean up potential conflicts first!
     perform_cleanup
     
     detect_distro
@@ -513,7 +580,6 @@ main() {
     done
     
     verify_dns "$DOMAIN"
-    
     ask_question "Email for SSL (optional):" LETSENCRYPT_EMAIL ""
     
     print_separator
@@ -525,6 +591,7 @@ main() {
     print_separator
     start_services
     
+    display_firewall_commands
     display_final_info
 }
 
