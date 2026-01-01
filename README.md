@@ -49,14 +49,14 @@ Created by [Ramtin - NetAdminPlus](https://netadminplus.com)
 
 ### One-Line Installation
 ```bash
-curl -fsSL https://raw.githubusercontent.com/netadminplus/rocketchat-deploy/main/rocketchat-installer.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/netadminplus/rocketchat-one-command/main/rocketchat-installer.sh | sudo bash
 ```
 
 ### Or Manual Installation
 ```bash
 # Clone the repository
-git clone https://github.com/netadminplus/rocketchat-deploy.git
-cd rocketchat-deploy
+git clone https://github.com/netadminplus/rocketchat-one-command.git
+cd rocketchat-one-command
 
 # Make installer executable
 chmod +x rocketchat-installer.sh

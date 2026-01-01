@@ -157,23 +157,23 @@ detect_distro() {
 check_system_requirements() {
     print_step "Checking system requirements..."
     
-    local requirements_met=true
+    # Check RAM (in MB for better accuracy)
+    local total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+    local total_ram_gb=$(echo "scale=1; $total_ram_mb/1024" | bc)
     
-    # Check RAM
-    local total_ram=$(free -g | awk '/^Mem:/{print $2}')
-    if [ "$total_ram" -lt 2 ]; then
-        print_error "RAM: ${total_ram}GB (Minimum 2GB required, 4GB recommended)"
-        requirements_met=false
+    if [ "$total_ram_mb" -lt 2048 ]; then
+        print_warning "RAM: ${total_ram_gb}GB detected (Minimum 2GB required, 4GB recommended)"
+        print_info "Your server may experience performance issues or instability"
+        echo ""
+        ask_question "Do you want to continue anyway? (yes/no)" continue_with_low_ram "no"
+        
+        if [[ ! "$continue_with_low_ram" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+            print_error "Installation cancelled due to insufficient RAM"
+            exit 1
+        fi
+        print_warning "Continuing with low RAM - monitor your system closely"
     else
-        print_success "RAM: ${total_ram}GB"
-    fi
-    
-    # Check CPU cores
-    local cpu_cores=$(nproc)
-    if [ "$cpu_cores" -lt 1 ]; then
-        print_warning "CPU: ${cpu_cores} core(s) (2+ cores recommended)"
-    else
-        print_success "CPU: ${cpu_cores} core(s)"
+        print_success "RAM: ${total_ram_gb}GB"
     fi
     
     # Check disk space (need at least 20GB)
