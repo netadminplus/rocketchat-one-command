@@ -123,10 +123,7 @@ fi
 # --- 6. Download & Generate Config ---
 print_step "Downloading Configuration Template"
 TEMPLATE_FILE="docker-compose.yml.template"
-# Clean previous
 rm -f "$TEMPLATE_FILE"
-
-# CHANGE THIS TO YOUR REPO URL
 TEMPLATE_URL="https://raw.githubusercontent.com/netadminplus/rocketchat-one-command/main/docker-compose.yml.template"
 
 if curl -s -f -O "$TEMPLATE_URL"; then
@@ -149,16 +146,22 @@ echo "RC_VERSION=$RC_VERSION" >> .env
 echo "MONGO_USER=$MONGO_USER" >> .env
 echo "MONGO_PASS=$MONGO_PASS" >> .env
 
-# Generate docker-compose.yml (Using ENV substitution is cleaner, but we copy template to final file)
+# --- CRITICAL FIX: Generate MongoDB KeyFile ---
+print_info "Generating MongoDB KeyFile..."
+openssl rand -base64 756 > mongodb.key
+chmod 400 mongodb.key
+# Attempt to set ownership to default mongo user (999) if possible, otherwise rely on read permissions
+chown 999:999 mongodb.key 2>/dev/null || true
+print_success "KeyFile generated."
+
+# Generate docker-compose.yml
 cp docker-compose.yml.template docker-compose.yml
 
-print_success "Configuration generated (.env and docker-compose.yml)"
-print_info "MongoDB Password generated and saved in .env"
+print_success "Configuration generated."
 
 # --- 7. Start Services ---
 print_step "Starting Services"
 
-# Attempt to install Compose plugin if missing
 if ! docker compose version &> /dev/null; then
     $PKG_MANAGER install -y docker-compose-plugin &> /dev/null
 fi
