@@ -22,51 +22,59 @@ echo "    Please answer the following questions."
 echo ""
 
 # Question 1: Domain
-read -p "1. Enter your Domain or IP (e.g. chat.mydomain.com): " DOMAIN
+read -p "1. Enter your Domain or IP (e.g. chat.mydomain.com): " DOMAIN < /dev/tty
 if [ -z "$DOMAIN" ]; then
     echo -e "${RED}Error: Domain is required.${NC}"
     exit 1
 fi
 
 # Question 2: Port
-read -p "2. Server Port (default: 3000): " PORT
+read -p "2. Server Port (default: 3000): " PORT < /dev/tty
 PORT=${PORT:-3000}
 
 # Question 3: Version
-read -p "3. Rocket.Chat Version (default: latest): " RELEASE
+read -p "3. Rocket.Chat Version (default: latest): " RELEASE < /dev/tty
 RELEASE=${RELEASE:-latest}
 
 # Question 4: Email
-read -p "4. Email for SSL/Alerts (optional, press Enter to skip): " EMAIL
+read -p "4. Email for SSL/Alerts (optional, press Enter to skip): " EMAIL < /dev/tty
 
 # Question 5: Docker Mirror
 echo ""
 echo "    If Docker Hub is blocked in your region, enter a mirror URL."
-read -p "5. Docker Mirror URL (default: None, press Enter to skip): " DOCKER_MIRROR
+read -p "5. Docker Mirror URL (default: None, press Enter to skip): " DOCKER_MIRROR < /dev/tty
 
 # --------------------------------------------------
 # 2. Check DNS
 # --------------------------------------------------
 echo -e "\n### Checking DNS Resolution ###"
-PUBLIC_IP=$(curl -s ifconfig.me)
-echo "    Your Public IP seems to be: $PUBLIC_IP"
-echo "    Checking if '$DOMAIN' points to '$PUBLIC_IP'..."
 
-if command -v host &> /dev/null; then
-    DOMAIN_IP=$(host $DOMAIN | grep "has address" | head -n 1 | awk '{print $4}')
-elif command -v getent &> /dev/null; then
-    DOMAIN_IP=$(getent hosts $DOMAIN | awk '{print $1}')
-else
-    echo "    Warning: Could not verify DNS (missing host/getent). Skipping..."
-fi
+# Try getting IP from ipify, fallback to ifconfig.me. 
+# -s = silent, --max-time = fail fast if blocked
+PUBLIC_IP=$(curl -s --max-time 5 https://api.ipify.org || curl -s --max-time 5 https://ifconfig.me/ip)
 
-if [ "$DOMAIN_IP" == "$PUBLIC_IP" ]; then
-    echo -e "    ${GREEN}OK: DNS verified! ($DOMAIN -> $PUBLIC_IP)${NC}"
+# Basic validation to ensure we got an IP and not HTML garbage
+if [[ ! "$PUBLIC_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo -e "    ${YELLOW}Warning: Could not detect Public IP (service blocked or unreachable). Skipping DNS check.${NC}"
 else
-    echo -e "    ${YELLOW}WARNING: DNS mismatch or check failed.${NC}"
-    echo "    Expected: $PUBLIC_IP"
-    echo "    Got:      $DOMAIN_IP"
-    echo "    Please ensure your DNS A record is set correctly."
+    echo "    Your Public IP seems to be: $PUBLIC_IP"
+    echo "    Checking if '$DOMAIN' points to '$PUBLIC_IP'..."
+
+    if command -v host &> /dev/null; then
+        DOMAIN_IP=$(host $DOMAIN | grep "has address" | head -n 1 | awk '{print $4}')
+    elif command -v getent &> /dev/null; then
+        DOMAIN_IP=$(getent hosts $DOMAIN | awk '{print $1}')
+    fi
+
+    if [ "$DOMAIN_IP" == "$PUBLIC_IP" ]; then
+        echo -e "    ${GREEN}OK: DNS verified! ($DOMAIN -> $PUBLIC_IP)${NC}"
+    elif [ -z "$DOMAIN_IP" ]; then
+        echo -e "    ${YELLOW}Warning: Could not resolve domain locally. Skipping check.${NC}"
+    else
+        echo -e "    ${YELLOW}WARNING: DNS mismatch.${NC}"
+        echo "    Expected: $PUBLIC_IP"
+        echo "    Got:      $DOMAIN_IP"
+    fi
 fi
 
 # --------------------------------------------------
@@ -91,40 +99,32 @@ else
     echo -e "    ${GREEN}OK: Docker already installed ($DOCKER_VER)${NC}"
 fi
 
-# Ensure Docker Compose is available (plugin or standalone)
+# Ensure Docker Compose is available
 if ! docker compose version &> /dev/null; then
      echo -e "    ${YELLOW}Docker Compose plugin not found. Attempting to install plugin...${NC}"
      apt-get update && apt-get install -y docker-compose-plugin
 fi
 
 # --------------------------------------------------
-# 4. Download Template (CRITICAL STEP FOR ONE-CLICK)
+# 4. Download Template
 # --------------------------------------------------
-# This step fetches the template because 'curl | bash' does not download repo files.
 echo -e "\n### Downloading Configuration Template ###"
 TEMPLATE_URL="https://raw.githubusercontent.com/netadminplus/rocketchat-one-command/main/docker-compose.yml.template"
+
+# Always remove old template to ensure we get a fresh one
+rm -f docker-compose.yml.template
 
 if curl -s -f -O "$TEMPLATE_URL"; then
     echo -e "    ${GREEN}OK: Template downloaded successfully.${NC}"
 else
     echo -e "    ${RED}ERROR: Failed to download docker-compose.yml.template from GitHub.${NC}"
-    echo "    Please check your internet connection or the repository URL."
     exit 1
 fi
 
 # --------------------------------------------------
-# 5. Generate Configuration
+# 5. Generate Configuration (.env)
 # --------------------------------------------------
 echo -e "\n### Generating Configuration ###"
-
-if [ ! -f "docker-compose.yml.template" ]; then
-    echo -e "    ${RED}ERROR: docker-compose.yml.template not found.${NC}" 
-    exit 1
-fi
-
-# Create .env file or export variables for substitution
-# We will use simple sed replacement to create the final docker-compose.yml
-cp docker-compose.yml.template docker-compose.yml
 
 # Determine Root URL
 ROOT_URL="http://$DOMAIN:$PORT"
@@ -132,13 +132,18 @@ if [ "$PORT" == "443" ] || [ "$PORT" == "80" ]; then
     ROOT_URL="https://$DOMAIN"
 fi
 
-# Replace variables in docker-compose.yml
-# NOTE: Depending on your OS, sed -i might need an empty string argument for backups
-sed -i "s|\${RELEASE}|$RELEASE|g" docker-compose.yml
-sed -i "s|\${ROOT_URL}|$ROOT_URL|g" docker-compose.yml
-sed -i "s|\${PORT}|$PORT|g" docker-compose.yml
+# Create .env file. Docker Compose automatically reads this.
+# This prevents YAML syntax errors caused by sed.
+echo "RELEASE=$RELEASE" > .env
+echo "ROOT_URL=$ROOT_URL" >> .env
+echo "PORT=$PORT" >> .env
+echo "MONGO_URL=mongodb://mongo:27017/rocketchat?replicaSet=rs0&directConnection=true" >> .env
+echo "MONGO_OPLOG_URL=mongodb://mongo:27017/local?replicaSet=rs0&directConnection=true" >> .env
 
-echo -e "    ${GREEN}OK: Configuration generated (docker-compose.yml).${NC}"
+# Simply copy the template to the actual file
+cp docker-compose.yml.template docker-compose.yml
+
+echo -e "    ${GREEN}OK: Configuration generated (.env and docker-compose.yml).${NC}"
 
 # --------------------------------------------------
 # 6. Start Services
