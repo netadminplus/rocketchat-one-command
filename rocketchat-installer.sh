@@ -243,7 +243,7 @@ install_dependencies() {
     case $PKG_MANAGER in
         apt)
             print_info "Updating package lists..."
-            apt update -qq
+            apt update -qq || true
             
             print_info "Installing dependencies..."
             apt install -y curl wget git ca-certificates gnupg lsb-release jq bc &> /dev/null
