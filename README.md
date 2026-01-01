@@ -1,251 +1,292 @@
-**English** | [فارسی](README.fa.md)
+<div align="right">
 
----
-
-# 🚀 RocketChat One-Command Installer
-
-<div align="center">
-
-![RocketChat](https://img.shields.io/badge/RocketChat-Latest-red)
-![Docker](https://img.shields.io/badge/Docker-Required-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
-
-**Easy RocketChat deployment with Docker, SSL, and automatic configuration**
-
-Created by [Ramtin - NetAdminPlus](https://netadminplus.com)
-
-[YouTube](https://youtube.com/@netadminplus) • [Website](https://netadminplus.com) • [Instagram](https://instagram.com/netadminplus)
+**فارسی** | [English](README.en.md)
 
 </div>
 
 ---
 
-## ✨ Features
+# نصب یک دستوری RocketChat
 
-- 🎯 **One-command installation** - Get RocketChat running in minutes
-- 🔒 **Automatic SSL** - Let's Encrypt certificates with auto-renewal
-- 🐳 **Docker-based** - Clean, isolated, and easy to manage
-- 🌍 **Iranian-friendly** - Docker registry mirror support
-- 🔐 **Auto-generated credentials** - Secure MongoDB passwords
-- 📊 **System checks** - Validates requirements before installation
-- 🔄 **DNS verification** - Checks domain configuration
-- 🛡️ **Multi-distro support** - Ubuntu, Debian, Rocky Linux, CentOS, AlmaLinux
-- 📁 **Organized structure** - All assets in one directory
-- ⚠️ **Flexible requirements** - Install with warnings if system doesn't meet minimum specs
+<div dir="rtl">
+
+**نصب آسان RocketChat با Docker، SSL و پیکربندی خودکار**
+
+ساخته شده توسط [رامتین - نت ادمین پلاس](https://netadminplus.com)
+
+[یوتیوب](https://youtube.com/@netadminplus) • [وبسایت](https://netadminplus.com) • [اینستاگرام](https://instagram.com/netadminplus)
 
 ---
 
-## 📋 Requirements
+## امکانات
 
-### System Requirements
-- **RAM**: Minimum 2GB (4GB recommended)
-- **CPU**: 2+ cores recommended
-- **Disk**: 20GB+ free space
-- **OS**: Ubuntu 20.04+, Debian 10+, Rocky Linux 8+, CentOS 7+, AlmaLinux 8+
-
-### Prerequisites
-- Root or sudo access
-- Domain/subdomain pointing to your server IP
-- Ports 80 and 443 open (firewall)
+- نصب با یک دستور
+- SSL خودکار با Let's Encrypt و تمدید اتوماتیک
+- مبتنی بر Docker
+- پشتیبانی از Docker registry mirror برای ایران
+- تولید خودکار رمزهای امن
+- بررسی سیستم قبل از نصب
+- بررسی DNS دامنه
+- پشتیبانی از Ubuntu، Debian، Rocky Linux، CentOS، AlmaLinux
+- ساختار منظم فایل‌ها
+- قابلیت نصب با هشدار اگر سیستم شرایط کامل را نداشته باشد
 
 ---
 
-## 🚀 Quick Start
+## پیش‌نیازها
 
-### Recommended: Download and Run
+**سخت‌افزار:**
+- حداقل 2GB رم (4GB پیشنهادی)
+- حداقل 2 هسته CPU (پیشنهادی)
+- حداقل 20GB فضای خالی
+
+**نرم‌افزار:**
+- Ubuntu 20.04+، Debian 10+، Rocky Linux 8+، CentOS 7+، AlmaLinux 8+
+- دسترسی root یا sudo
+- دامنه یا ساب‌دامنه که به IP سرور شما اشاره کند
+- پورت‌های 80 و 443 باز باشند
+
+---
+
+## نصب
+
+### روش پیشنهادی: دانلود و اجرا
+
+</div>
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/netadminplus/rocketchat-one-command/main/rocketchat-installer.sh -o rocketchat-installer.sh
+curl -fsSL [https://raw.githubusercontent.com/netadminplus/rocketchat-one-command/main/rocketchat-installer.sh](https://raw.githubusercontent.com/netadminplus/rocketchat-one-command/main/rocketchat-installer.sh) -o rocketchat-installer.sh
 chmod +x rocketchat-installer.sh
 sudo ./rocketchat-installer.sh
 ```
 
-### Alternative: One-Line Installation
+<div dir="rtl">
 
-⚠️ **Note**: The one-line method may have issues with interactive prompts. Use the download method above if you encounter problems.
+### روش جایگزین: نصب یک خطی
+
+⚠️ **توجه**: این روش ممکن است با ورودی تعاملی مشکل داشته باشد. روش بالا را امتحان کنید.
+
+</div>
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/netadminplus/rocketchat-one-command/main/rocketchat-installer.sh | sudo bash
+curl -fsSL [https://raw.githubusercontent.com/netadminplus/rocketchat-one-command/main/rocketchat-installer.sh](https://raw.githubusercontent.com/netadminplus/rocketchat-one-command/main/rocketchat-installer.sh) | sudo bash
 ```
 
-### Or Manual Installation
+<div dir="rtl">
+
+### یا clone کردن از گیت‌هاب
+
+</div>
+
 ```bash
-# Clone the repository
-git clone https://github.com/netadminplus/rocketchat-one-command.git
+git clone [https://github.com/netadminplus/rocketchat-one-command.git](https://github.com/netadminplus/rocketchat-one-command.git)
 cd rocketchat-one-command
-
-# Make installer executable
 chmod +x rocketchat-installer.sh
-
-# Run installer
 sudo ./rocketchat-installer.sh
 ```
 
----
-
-## 📖 Installation Process
-
-The installer will:
-
-1. ✅ Check system requirements (RAM, CPU, disk)
-2. ✅ Detect your Linux distribution
-3. ✅ Check Docker Hub accessibility
-4. ✅ Install/update Docker and Docker Compose
-5. ✅ Ask for your domain name
-6. ✅ Verify DNS configuration
-7. ✅ Ask for email (optional, for SSL notifications)
-8. ✅ Ask for Docker registry mirror (if needed)
-9. ✅ Generate secure MongoDB credentials
-10. ✅ Setup Docker Compose configuration
-11. ✅ Obtain SSL certificate from Let's Encrypt
-12. ✅ Configure automatic certificate renewal
-13. ✅ Display firewall configuration commands
-14. ✅ Start RocketChat containers
-15. ✅ Show access information and credentials
+<div dir="rtl">
 
 ---
 
-## 📂 Project Structure
+## مراحل نصب
 
-After installation, your directory will contain:
+اسکریپت این کارها را انجام می‌دهد:
+
+1. بررسی رم، CPU و دیسک
+2. تشخیص نوع لینوکس
+3. بررسی دسترسی به Docker Hub
+4. نصب یا آپدیت Docker و Docker Compose
+5. دریافت دامنه از شما
+6. بررسی DNS دامنه
+7. دریافت ایمیل (اختیاری، برای اطلاع‌رسانی SSL)
+8. دریافت آدرس Docker registry mirror (در صورت نیاز)
+9. تولید رمزهای امن MongoDB
+10. ساخت فایل Docker Compose
+11. دریافت گواهی SSL از Let's Encrypt
+12. تنظیم تمدید خودکار گواهی
+13. نمایش دستورات فایروال
+14. راه‌اندازی کانتینرها
+15. نمایش اطلاعات دسترسی و رمزها
+
+---
+
+## ساختار فایل‌ها
+
+بعد از نصب، این فایل‌ها در پوشه شما خواهند بود:
+
+</div>
+
 ```
 rocketchat-one-command/
-├── docker-compose.yml       # Docker Compose configuration
-├── .env                      # Environment variables & credentials
+├── docker-compose.yml       # تنظیمات Docker Compose
+├── .env                      # متغیرها و رمزها
 ├── data/
-│   ├── mongodb/             # MongoDB database files
-│   ├── uploads/             # RocketChat file uploads
-│   └── certs/               # SSL certificates
-└── rocketchat-installer.sh  # Installer script
+│   ├── mongodb/             # فایل‌های دیتابیس MongoDB
+│   ├── uploads/             # فایل‌های آپلود شده
+│   └── certs/               # گواهی‌های SSL
+└── rocketchat-installer.sh  # اسکریپت نصب
 ```
+
+<div dir="rtl">
 
 ---
 
-## 🔧 Configuration
+## تنظیمات
 
-### Environment Variables
+### مشاهده رمزها
 
-All credentials and configuration are stored in `.env` file:
+تمام رمزها و تنظیمات در فایل `.env` ذخیره می‌شوند:
+
+</div>
+
 ```bash
 cat .env
 ```
 
-### Accessing RocketChat
+<div dir="rtl">
 
-After installation completes:
+### دسترسی به RocketChat
+
+بعد از نصب:
+
+</div>
+
 ```
-URL: https://your-domain.com
-Admin Setup: First user to register becomes admin
+آدرس: [https://your-domain.com](https://your-domain.com)
+نکته: اولین کاربری که ثبت‌نام می‌کند، ادمین می‌شود
 ```
+
+<div dir="rtl">
 
 ---
 
-## 🔒 Firewall Configuration
+## تنظیم فایروال
 
-The installer will display commands to configure your firewall. Example for UFW:
+اسکریپت دستورات فایروال را نمایش می‌دهد. مثال برای UFW:
+
+</div>
+
 ```bash
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw reload
 ```
 
----
-
-## 🔄 Updates
-
-See [UPDATE.md](docs/UPDATE.md) for instructions on updating RocketChat.
+<div dir="rtl">
 
 ---
 
-## 🐛 Troubleshooting
+## آپدیت
 
-See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues and solutions.
+برای آپدیت RocketChat، فایل [UPDATE.md](docs/UPDATE.md) را ببینید.
 
 ---
 
-## 📁 Important Files
+## رفع مشکلات
 
-- **`.env`** - Contains all credentials (MongoDB password, etc.)
-- **`docker-compose.yml`** - Service configuration
-- **`data/`** - All persistent data (database, uploads, certificates)
+برای مشکلات رایج و راه‌حل‌ها، فایل [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) را ببینید.
 
-### Backup Recommendations
+---
+
+## فایل‌های مهم
+
+- **`.env`** - شامل تمام رمزها (رمز MongoDB و غیره)
+- **`docker-compose.yml`** - تنظیمات سرویس‌ها
+- **`data/`** - تمام داده‌های دائمی (دیتابیس، آپلودها، گواهی‌ها)
+
+### پشتیبان‌گیری
+
+</div>
+
 ```bash
-# Backup data directory
+# بکاپ از پوشه data
 tar -czf rocketchat-backup-$(date +%Y%m%d).tar.gz data/
 
-# Backup environment file
+# بکاپ از فایل env
 cp .env .env.backup
 ```
 
+<div dir="rtl">
+
 ---
 
-## 🛑 Stopping/Starting RocketChat
+## متوقف کردن / راه‌اندازی RocketChat
+
+</div>
+
 ```bash
-# Stop services
+# متوقف کردن سرویس‌ها
 docker compose down
 
-# Start services
+# راه‌اندازی سرویس‌ها
 docker compose up -d
 
-# View logs
+# مشاهده لاگ‌ها
 docker compose logs -f
 
-# Restart services
+# ریستارت سرویس‌ها
 docker compose restart
 ```
 
+<div dir="rtl">
+
 ---
 
-## 🗑️ Uninstallation
+## حذف کامل
+
+</div>
+
 ```bash
-# Stop and remove containers
+# متوقف و حذف کانتینرها
 docker compose down -v
 
-# Remove data (⚠️ This deletes everything!)
+# حذف داده‌ها (⚠️ این کار همه چیز را پاک می‌کند!)
 rm -rf data/
 
-# Optionally remove Docker
+# حذف Docker (اختیاری)
 # Ubuntu/Debian: sudo apt remove docker-ce docker-ce-cli containerd.io
 # Rocky/CentOS: sudo dnf remove docker-ce docker-ce-cli containerd.io
 ```
 
----
-
-## 🤝 Support
-
-- 📺 **YouTube**: [@netadminplus](https://youtube.com/@netadminplus)
-- 🌐 **Website**: [netadminplus.com](https://netadminplus.com)
-- 📸 **Instagram**: [@netadminplus](https://instagram.com/netadminplus)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/netadminplus/rocketchat-one-command/issues)
+<div dir="rtl">
 
 ---
 
-## 📝 License
+## پشتیبانی
 
-MIT License - Feel free to use and modify
-
----
-
-## 👨‍💻 Author
-
-**Ramtin - NetAdminPlus**
-
-Helping Iranian community deploy open-source communication tools
-
-[YouTube](https://youtube.com/@netadminplus) • [Website](https://netadminplus.com) • [Instagram](https://instagram.com/netadminplus)
+- 📺 **یوتیوب**: [@netadminplus](https://youtube.com/@netadminplus)
+- 🌐 **وبسایت**: [netadminplus.com](https://netadminplus.com)
+- 📸 **اینستاگرام**: [@netadminplus](https://instagram.com/netadminplus)
+- 🐛 **گزارش مشکل**: [GitHub Issues](https://github.com/netadminplus/rocketchat-one-command/issues)
 
 ---
 
-## ⭐ Show Your Support
+## لایسنس
 
-If this project helped you, please:
-- ⭐ Star this repository
-- 📺 Subscribe to [NetAdminPlus YouTube](https://youtube.com/@netadminplus)
-- 📢 Share with your friends and colleagues
+MIT License - استفاده و تغییر آزاد است
 
 ---
 
-<div align="center">
+## سازنده
 
-**Made with ❤️ for the Iranian Tech Community**
+**رامتین - نت ادمین پلاس**
+
+کمک به جامعه ایرانی برای استقرار ابزارهای ارتباطی متن‌باز
+
+[یوتیوب](https://youtube.com/@netadminplus) • [وبسایت](https://netadminplus.com) • [اینستاگرام](https://instagram.com/netadminplus)
+
+---
+
+## حمایت از پروژه
+
+اگر این پروژه به شما کمک کرد:
+- ⭐ به این ریپازیتوری ستاره بدهید
+- 📺 کانال [نت ادمین پلاس](https://youtube.com/@netadminplus) را سابسکرایب کنید
+- 📢 با دوستان و همکاران به اشتراک بگذارید
+
+---
+
+**ساخته شده با ❤️ برای جامعه تکنولوژی ایران**
 
 </div>
