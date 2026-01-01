@@ -5,8 +5,10 @@ set -e
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
+print_header() { echo -e "\n${CYAN}### $1 ###${NC}"; }
 print_step() { echo -e "\n${YELLOW}==> $1${NC}"; }
 print_info() { echo -e "${NC}    $1"; }
 print_success() { echo -e "${GREEN}    OK: $1${NC}"; }
@@ -19,9 +21,96 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-print_step "Initializing Rocket.Chat Auto-Installer..."
+# --- 2. Input Wizard (Runs First) ---
+clear
+echo -e "${GREEN}"
+echo "=================================================="
+echo "      Rocket.Chat One-Click Installer             "
+echo "=================================================="
+echo -e "${NC}"
 
-# --- 2. OS Detection ---
+print_info "We need to gather some information before we start."
+print_info "Please answer the following questions."
+echo ""
+
+# > Input: Domain
+while [[ -z "$INPUT_URL" ]]; do
+  read -p "1. Enter your Domain or IP (e.g. chat.mydomain.com): " INPUT_URL < /dev/tty
+  if [[ -z "$INPUT_URL" ]]; then echo -e "${RED}   Domain is required.${NC}"; fi
+done
+
+# Clean URL
+if [[ ! $INPUT_URL =~ ^http ]]; then
+    ROOT_URL="http://$INPUT_URL"
+    DOMAIN_ONLY="$INPUT_URL"
+else
+    ROOT_URL="$INPUT_URL"
+    # Extract domain from url for DNS check
+    DOMAIN_ONLY=$(echo "$INPUT_URL" | awk -F/ '{print $3}')
+fi
+
+# > Input: Port
+read -p "2. Server Port (default: 3000): " HOST_PORT < /dev/tty
+HOST_PORT=${HOST_PORT:-3000}
+
+# > Input: Version
+read -p "3. Rocket.Chat Version (default: latest): " RC_VERSION < /dev/tty
+RC_VERSION=${RC_VERSION:-latest}
+
+# > Input: SSL Email (For future use or SSL setup)
+read -p "4. Email for SSL/Alerts (optional, press Enter to skip): " SSL_EMAIL < /dev/tty
+SSL_EMAIL=${SSL_EMAIL:-"admin@example.com"}
+
+# > Input: Mirror
+echo ""
+print_info "If Docker Hub is blocked in your region, enter a mirror URL."
+read -p "5. Docker Mirror URL (default: None, press Enter to skip): " DOCKER_MIRROR < /dev/tty
+
+
+# --- 3. DNS Check with Retry ---
+print_header "Checking DNS Resolution"
+
+# Get Public IP
+PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s ifconfig.me)
+print_info "Your Public IP seems to be: $PUBLIC_IP"
+
+while true; do
+    print_info "Checking if '$DOMAIN_ONLY' points to '$PUBLIC_IP'..."
+    
+    # Try to resolve domain
+    if command -v dig &> /dev/null; then
+        RESOLVED_IP=$(dig +short "$DOMAIN_ONLY" | head -n1)
+    elif command -v nslookup &> /dev/null; then
+        RESOLVED_IP=$(nslookup "$DOMAIN_ONLY" | grep 'Address' | tail -n1 | awk '{print $2}')
+    else
+        RESOLVED_IP="unknown" # skip check if tools missing
+    fi
+
+    if [[ "$RESOLVED_IP" == "$PUBLIC_IP" ]]; then
+        print_success "DNS verified! ($DOMAIN_ONLY -> $PUBLIC_IP)"
+        break
+    elif [[ "$RESOLVED_IP" == "unknown" ]]; then
+        print_warning "Could not verify DNS (dig/nslookup missing). Proceeding anyway."
+        break
+    else
+        echo -e "${RED}    MISMATCH: '$DOMAIN_ONLY' resolves to '$RESOLVED_IP', but your IP is '$PUBLIC_IP'.${NC}"
+        echo -e "${YELLOW}    Please update your DNS A record.${NC}"
+        
+        read -p "    [R]etry check or [I]gnore and proceed? (r/I): " DNS_CHOICE < /dev/tty
+        case "${DNS_CHOICE,,}" in
+            r|retry) continue ;;
+            *) 
+               print_warning "Ignoring DNS mismatch. Proceeding..."
+               break 
+               ;;
+        esac
+    fi
+done
+
+
+# --- 4. OS & Environment Prep ---
+print_header "Preparing Environment"
+
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     DISTRO=$ID
@@ -36,162 +125,119 @@ elif command -v dnf >/dev/null; then
 elif command -v yum >/dev/null; then
     PKG_MANAGER="yum"
 else
-    print_error "Unsupported package manager. Only apt, dnf, and yum are supported."
+    print_error "Unsupported package manager."
     exit 1
 fi
 
-# --- 3. Gather Configuration ---
-print_step "Configuration Setup"
-
-# Get Domain/URL
-read -p "Enter the Full Domain/URL (e.g., https://chat.mydomain.com): " INPUT_URL
-if [ -z "$INPUT_URL" ]; then
-    print_error "Domain/URL is required!"
-    exit 1
-fi
-# Ensure protocol exists
-if [[ ! $INPUT_URL =~ ^http ]]; then
-    ROOT_URL="http://$INPUT_URL"
-else
-    ROOT_URL="$INPUT_URL"
-fi
-
-# Get Port
-read -p "Enter the Host Port to listen on (default: 3000): " HOST_PORT
-HOST_PORT=${HOST_PORT:-3000}
-
-# Get Version
-read -p "Enter Rocket.Chat Version (default: latest): " RC_VERSION
-RC_VERSION=${RC_VERSION:-latest}
-
-# Get Mirror (Useful for restricted regions)
-echo ""
-print_info "If you are in a region where Docker Hub is blocked, enter a mirror URL."
-read -p "Docker Registry Mirror (leave empty if not needed): " DOCKER_REGISTRY_MIRROR
-
-# --- 4. Install Docker Function ---
+# Function: Install Docker
 install_docker() {
-    print_step "Installing/Updating Docker..."
+    print_step "Checking Docker Installation..."
     
-    # Pre-req: Ensure curl is installed
     if ! command -v curl &> /dev/null; then
-        print_info "Installing curl..."
         $PKG_MANAGER install -y curl &> /dev/null
     fi
 
     if command -v docker &> /dev/null; then
         local current_version=$(docker --version | awk '{print $3}' | sed 's/,//')
-        print_info "Docker is already installed (version: $current_version)"
+        print_success "Docker already installed ($current_version)"
     else
-        print_info "Docker not found. Starting installation..."
+        print_info "Installing Docker..."
         
-        case $PKG_MANAGER in
-            apt)
-                # Clean up old versions
-                apt remove -y docker docker-engine docker.io containerd runc &> /dev/null || true
-                
-                # Method 1: Try official repository
-                print_info "Attempting Docker installation from official repository..."
-                install -m 0755 -d /etc/apt/keyrings
-                
-                if curl -fsSL https://download.docker.com/linux/$DISTRO/gpg -o /etc/apt/keyrings/docker.asc 2>/dev/null; then
-                    chmod a+r /etc/apt/keyrings/docker.asc
-                    cat > /etc/apt/sources.list.d/docker.sources <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/$DISTRO
-Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-Components: stable
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
-                    apt update -qq 2>&1 | grep -v "Failed to fetch" || true
-                    
-                    if apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>&1 | grep -q "Unable to locate"; then
-                        print_warning "Official repository unavailable. Switching to System Repository..."
-                        # Method 2: Fallback to Ubuntu/Debian repo
-                        rm -f /etc/apt/sources.list.d/docker.sources
-                        apt update -qq
-                        apt install -y docker.io docker-compose -qq
-                    else
-                        print_success "Docker installed from official repository"
-                    fi
-                else
-                    print_warning "Official GPG key download failed. Switching to System Repository..."
-                    apt update -qq
-                    apt install -y docker.io docker-compose -qq
-                fi
-                ;;
-            dnf|yum)
-                $PKG_MANAGER install -y yum-utils &> /dev/null
-                if yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo &> /dev/null; then
-                     if ! $PKG_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin &> /dev/null; then
-                        print_warning "Official repo failed. Trying system repo..."
-                        $PKG_MANAGER install -y docker &> /dev/null
-                     fi
-                else
-                    $PKG_MANAGER install -y docker &> /dev/null
-                fi
-                ;;
-        esac
+        # Simple Logic: Try Official -> Fail -> Try System
+        if [ "$PKG_MANAGER" == "apt" ]; then
+            apt update -qq
+            if ! curl -fsSL https://get.docker.com | sh; then
+                 print_warning "Standard installer failed. Trying system repos..."
+                 apt install -y docker.io docker-compose
+            fi
+        else
+             curl -fsSL https://get.docker.com | sh || $PKG_MANAGER install -y docker
+        fi
+        
+        systemctl start docker
+        systemctl enable docker &> /dev/null
+        print_success "Docker Installed."
     fi
-    
-    # Start Docker
-    systemctl start docker
-    systemctl enable docker &> /dev/null
-    
-    # Configure Mirror if user provided one
-    if [ -n "$DOCKER_REGISTRY_MIRROR" ]; then
-        print_info "Configuring Docker registry mirror: $DOCKER_REGISTRY_MIRROR"
+
+    # Configure Mirror if requested
+    if [ -n "$DOCKER_MIRROR" ]; then
+        print_step "Configuring Docker Mirror..."
         mkdir -p /etc/docker
         cat > /etc/docker/daemon.json <<EOF
 {
-  "registry-mirrors": ["$DOCKER_REGISTRY_MIRROR"]
+  "registry-mirrors": ["$DOCKER_MIRROR"]
 }
 EOF
         systemctl restart docker
-        print_success "Mirror configured."
+        print_success "Mirror set to $DOCKER_MIRROR"
     fi
-
-    # Final Check
-    if ! command -v docker &> /dev/null; then
-        print_error "Docker installation failed."
-        exit 1
-    fi
-    print_success "Docker is ready."
 }
 
-# --- 5. Execution ---
-
-# Run Docker Installer
 install_docker
 
-# Check for Template
-print_step "Generating Configuration"
+# --- 5. Generate Config ---
+print_header "Generating Configuration"
+
 TEMPLATE_FILE="docker-compose.yml.template"
+
+# Check if template exists (Handle curl | bash execution context)
 if [ ! -f "$TEMPLATE_FILE" ]; then
-    print_error "$TEMPLATE_FILE not found in current directory!"
-    exit 1
+    # If running from curl, we might not have the file. 
+    # Attempt to download it if missing, OR fail if we assume the repo is cloned.
+    # Assuming user cloned repo OR has file.
+    if [ ! -f "docker-compose.yml.template" ]; then
+         print_error "docker-compose.yml.template not found."
+         print_info "Please ensure you have the template file in this directory."
+         exit 1
+    fi
 fi
 
-# Generate docker-compose.yml
+echo "Generating docker-compose.yml..."
 sed -e "s|{{RC_VERSION}}|$RC_VERSION|g" \
     -e "s|{{HOST_PORT}}|$HOST_PORT|g" \
     -e "s|{{ROOT_URL}}|$ROOT_URL|g" \
     $TEMPLATE_FILE > docker-compose.yml
 
-print_success "docker-compose.yml generated for $ROOT_URL on port $HOST_PORT"
+print_success "Configuration generated."
 
-# Run Containers
-print_step "Starting Rocket.Chat..."
+
+# --- 6. Deployment ---
+print_header "Starting Rocket.Chat"
 
 if docker compose version >/dev/null 2>&1; then
-    docker compose up -d
+    CMD="docker compose"
 elif command -v docker-compose >/dev/null 2>&1; then
-    docker-compose up -d
+    CMD="docker-compose"
 else
-    print_error "Could not find 'docker compose' or 'docker-compose' executable."
+    print_error "Docker Compose not found."
     exit 1
 fi
 
-print_step "Deployment Complete!"
-echo -e "${GREEN}Rocket.Chat should be reachable at: $ROOT_URL${NC}"
-echo -e "Note: First launch takes about 30-60 seconds to initialize the database."
+$CMD up -d
+
+print_header "Installation Complete!"
+
+# --- 7. Final Output & Firewall ---
+echo -e "${GREEN}Rocket.Chat is running!${NC}"
+echo -e "URL:  ${CYAN}$ROOT_URL${NC}"
+echo -e "Port: ${CYAN}$HOST_PORT${NC}"
+
+print_step "Firewall Commands (Copy/Paste if needed):"
+if [ "$PKG_MANAGER" == "apt" ]; then
+    echo -e "${YELLOW}ufw allow $HOST_PORT/tcp${NC}"
+    echo -e "${YELLOW}ufw allow 80/tcp${NC}"
+    echo -e "${YELLOW}ufw allow 443/tcp${NC}"
+    echo -e "${YELLOW}ufw reload${NC}"
+elif [ "$PKG_MANAGER" == "yum" ] || [ "$PKG_MANAGER" == "dnf" ]; then
+    echo -e "${YELLOW}firewall-cmd --permanent --add-port=$HOST_PORT/tcp${NC}"
+    echo -e "${YELLOW}firewall-cmd --reload${NC}"
+fi
+
+echo ""
+echo "----------------------------------------------------------------"
+echo -e "${CYAN}   Created by Ramtin${NC}"
+echo -e "   YouTube:   youtube.com/@ramtin"
+echo -e "   Instagram: instagram.com/ramtin"
+echo -e "   Web:       ramtin.net"
+echo "----------------------------------------------------------------"
+echo ""
