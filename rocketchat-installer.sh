@@ -243,6 +243,7 @@ install_dependencies() {
     case $PKG_MANAGER in
         apt)
             print_info "Updating package lists..."
+            # Added || true to prevent script exit on 403 Forbidden errors
             apt update -qq || true
             
             print_info "Installing dependencies..."
@@ -309,7 +310,7 @@ EOF
                     
                     # Method 2: Install from Ubuntu repository
                     print_info "Installing Docker from Ubuntu repository..."
-                    apt update -qq
+                    apt update -qq || true
                     apt install -y docker.io docker-compose -qq
                     
                     # Create docker compose plugin symlink for compatibility
@@ -327,7 +328,7 @@ EOF
                 # Clean up
                 rm -f /etc/apt/sources.list.d/docker.sources /etc/apt/keyrings/docker.asc
                 
-                apt update -qq
+                apt update -qq || true
                 apt install -y docker.io docker-compose -qq
                 
                 # Create docker compose plugin symlink for compatibility
@@ -501,6 +502,26 @@ EOF
     print_success "Environment file created: $ENV_FILE"
 }
 
+create_directories() {
+    print_step "Creating data directories..."
+    
+    mkdir -p "$MONGODB_DATA"
+    mkdir -p "$UPLOADS_DIR"
+    mkdir -p "$CERTS_DIR"
+    
+    # Create MongoDB keyfile for replica set authentication
+    print_info "Generating MongoDB keyfile..."
+    local keyfile="$MONGODB_DATA/replica.key"
+    openssl rand -base64 756 > "$keyfile"
+    chmod 400 "$keyfile"
+    # Ensure user 999 (mongo) can read the file
+    chown 999:999 "$keyfile"
+    
+    chmod 755 "$DATA_DIR"
+    
+    print_success "Data directories created"
+}
+
 create_docker_compose() {
     print_step "Creating Docker Compose configuration..."
     
@@ -514,10 +535,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./data/mongodb:/data/db
+      - ./data/mongodb/replica.key:/etc/mongo-keyfile:ro
     environment:
       - MONGO_INITDB_ROOT_USERNAME=root
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
-    command: mongod --oplogSize 128 --replSet rs0
+    command: mongod --oplogSize 128 --replSet rs0 --keyFile /etc/mongo-keyfile
     networks:
       - rocketchat-network
     healthcheck:
@@ -623,6 +645,14 @@ create_directories() {
     mkdir -p "$MONGODB_DATA"
     mkdir -p "$UPLOADS_DIR"
     mkdir -p "$CERTS_DIR"
+    
+    # Create MongoDB keyfile for replica set authentication
+    print_info "Generating MongoDB keyfile..."
+    local keyfile="$MONGODB_DATA/replica.key"
+    openssl rand -base64 756 > "$keyfile"
+    chmod 400 "$keyfile"
+    # Ensure user 999 (mongo) can read the file
+    chown 999:999 "$keyfile"
     
     chmod 755 "$DATA_DIR"
     
