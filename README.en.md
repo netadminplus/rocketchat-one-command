@@ -24,14 +24,15 @@ Created by [Ramtin - NetAdminPlus](https://netadminplus.com)
 
 - 🎯 **One-command installation** - Get RocketChat running in minutes
 - 🔒 **Automatic SSL** - Let's Encrypt certificates with auto-renewal
+- 📂 **Custom Installation Path** - Choose where to install (Default: `~/netadminplus-rocketchat`)
+- 🤖 **Auto-Maintenance** - Optional Cronjob for weekly certificate checks/restarts
+- ⏳ **Smart Wait System** - Checks logs and waits until Rocket.Chat is actually ready (No "Bad Gateway" errors)
 - 🐳 **Docker-based** - Clean, isolated, and easy to manage
-- 🌍 **Iranian-friendly** - Docker registry mirror support
+- 🌍 **Region Support** - Docker registry mirror support
 - 🔐 **Auto-generated credentials** - Secure MongoDB passwords
 - 📊 **System checks** - Validates requirements before installation
 - 🔄 **DNS verification** - Checks domain configuration
-- 🛡️ **Multi-distro support** - Ubuntu, Debian, Rocky Linux, CentOS, AlmaLinux
-- 📁 **Organized structure** - All assets in one directory
-- ⚠️ **Flexible requirements** - Install with warnings if system doesn't meet minimum specs
+- 🛡️ **Firewall Detection** - Suggests commands for UFW or Firewalld
 
 ---
 
@@ -85,31 +86,28 @@ sudo ./rocketchat-installer.sh
 
 The installer will:
 
-1. ✅ Check system requirements (RAM, CPU, disk)
-2. ✅ Detect your Linux distribution
-3. ✅ Check Docker Hub accessibility
-4. ✅ Install/update Docker and Docker Compose
-5. ✅ Ask for your domain name
-6. ✅ Verify DNS configuration
-7. ✅ Ask for email (optional, for SSL notifications)
-8. ✅ Ask for Docker registry mirror (if needed)
-9. ✅ Generate secure MongoDB credentials
-10. ✅ Setup Docker Compose configuration
-11. ✅ Obtain SSL certificate from Let's Encrypt
-12. ✅ Configure automatic certificate renewal
-13. ✅ Display firewall configuration commands
-14. ✅ Start RocketChat containers
-15. ✅ Show access information and credentials
+1. ✅ Check system requirements
+2. ✅ Ask for **Installation Directory** (Default: `~/netadminplus-rocketchat`)
+3. ✅ Create necessary data folders
+4. ✅ Install/update Docker
+5. ✅ Verify DNS configuration for your domain
+6. ✅ Generate secure credentials
+7. ✅ **Optionally setup a Cronjob** for weekly maintenance
+8. ✅ Start Containers
+9. ✅ **Wait for Server:** Monitors logs until "SERVER RUNNING" appears
+10. ✅ Display specific Firewall instructions
 
 ---
 
 ## 📂 Project Structure
 
-After installation, your directory will contain:
+Default installation location is `~/netadminplus-rocketchat`:
 ```
-rocketchat-one-command/
+netadminplus-rocketchat/
 ├── docker-compose.yml       # Docker Compose configuration
-├── .env                      # Environment variables & credentials
+├── .env                     # Environment variables & credentials
+├── renew-cert.sh            # Maintenance script (run by Cron)
+├── cron.log                 # Cronjob logs
 ├── data/
 │   ├── mongodb/             # MongoDB database files
 │   ├── uploads/             # RocketChat file uploads
@@ -140,12 +138,23 @@ Admin Setup: First user to register becomes admin
 
 ## 🔒 Firewall Configuration
 
-The installer will display commands to configure your firewall. Example for UFW:
+The installer attempts to detect your firewall manager (UFW or Firewalld) and provides the exact commands.
+
+**Example (UFW):**
 ```bash
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw reload
 ```
+
+---
+
+## 🤖 Automatic Maintenance
+
+During installation, you can enable a Cronjob that:
+- Runs weekly (Sunday at 3:00 AM).
+- Executes `renew-cert.sh`.
+- Restarts Traefik to ensure fresh SSL certificates are loaded.
 
 ---
 
@@ -180,6 +189,9 @@ cp .env .env.backup
 
 ## 🛑 Stopping/Starting RocketChat
 ```bash
+# Navigate to install dir
+cd ~/netadminplus-rocketchat
+
 # Stop services
 docker compose down
 
@@ -197,11 +209,16 @@ docker compose restart
 
 ## 🗑️ Uninstallation
 ```bash
+cd ~/netadminplus-rocketchat
+
 # Stop and remove containers
 docker compose down -v
 
+# Go back one level
+cd ..
+
 # Remove data (⚠️ This deletes everything!)
-rm -rf data/
+rm -rf netadminplus-rocketchat/
 
 # Optionally remove Docker
 # Ubuntu/Debian: sudo apt remove docker-ce docker-ce-cli containerd.io
